@@ -11,10 +11,18 @@ venv/
 # OS
 .DS_Store
 
-# Runtime / local files
+# Runtime / local data (keep state.sample.json as template)
 state.json
 agents-state.json
-# keep join-keys.json in repo for first-run demo
+data/economy-agents.json
+data/ledger.json
+data/battles.json
+data/tasks.json
+data/push-tokens.json
+data/join-keys.json
+data/alliances.json
+
+# Logs & temp
 *.log
 *.out
 *.pid

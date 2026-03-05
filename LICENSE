@@ -1,11 +1,8 @@
-# Star Office UI — License & Usage Notice
-
-## 1. Code / Logic License (MIT)
-
-The code/logic in this repository (the "Software") is licensed under the MIT License:
-
 MIT License
 
+Copyright (c) 2026 Aiko Dai
+
+Based on Star Office UI (https://github.com/ringhyacinth/Star-Office-UI)
 Copyright (c) 2026 Ring Hyacinth
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -28,30 +25,23 @@ SOFTWARE.
 
 ---
 
-## 2. Art Assets License & Disclaimer
+Art Assets License
 
-### Important: Art Assets are NOT for commercial use
+Original pixel art assets created for Claw Arena (including but not limited to
+character sprites, backgrounds, and UI elements in the frontend/ directory)
+are licensed under Creative Commons Attribution-NonCommercial 4.0 International
+(CC BY-NC 4.0).
 
-All art assets (including but not limited to: character sprites, scene backgrounds, posters, furniture, plants, coffee machine, server room, animations, and the full asset pack) are **non-commercial only**. They are for **learning, demonstration, and idea sharing only**.
+You are free to:
+- Share: copy and redistribute the material in any medium or format
+- Adapt: remix, transform, and build upon the material
 
-You may NOT use any art assets from this repository for any commercial purpose. If you want to use this project commercially, you **must create and replace all art assets with your own original work**.
+Under the following terms:
+- Attribution: You must give appropriate credit to Claw Arena
+  (https://github.com/aikoooly/Claw_Arena)
+- NonCommercial: You may not use the material for commercial purposes
 
----
+Full license text: https://creativecommons.org/licenses/by-nc/4.0/
 
-## 3. Additional Disclaimer (Starmie / Pokémon)
-
-- The main character "Starmie" is an existing IP from Nintendo/Pokémon and is **not original to this project**.
-- This project is a non-commercial fan creation only; the character was chosen for a fun homophone between "Starmie" and the author’s Chinese name "海辛" (Hǎi Xīn).
-- This project’s fan content is for learning, demonstration, and idea sharing only, with no commercial use.
-- Nintendo, Pokémon, and "Starmie" are trademarks or registered trademarks of Nintendo/The Pokémon Company.
-- If you plan to use any content related to this project, please assess compliance risks on your own and prioritize using your own original characters/art assets.
-
----
-
-## 4. Guest Character Asset Attribution
-
-Guest character animations use LimeZu’s free assets:
-- Animated Mini Characters 2 (Platformer) [FREE]
-- https://limezu.itch.io/animated-mini-characters-2-platform-free
-
-Please keep this source attribution and follow the original author’s license terms when redistributing or demonstrating.
+Any art assets originating from Star Office UI are subject to their own license:
+https://github.com/ringhyacinth/Star-Office-UI#license

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "t01",
+    "prompt": "用你主人的语气唱一首《我是猪》",
+    "tag": "唱歌"
+  },
+  {
+    "id": "t02",
+    "prompt": "以你主人的口吻写一封深情的辞职信",
+    "tag": "写作"
+  },
+  {
+    "id": "t03",
+    "prompt": "模仿你主人跟客服投诉外卖少了一根筷子",
+    "tag": "表演"
+  },
+  {
+    "id": "t04",
+    "prompt": "用你主人的说话风格写一首赞美赢家的诗",
+    "tag": "写作"
+  },
+  {
+    "id": "t05",
+    "prompt": "假装你是你主人，在面试中介绍自己最大的缺点",
+    "tag": "表演"
+  },
+  {
+    "id": "t06",
+    "prompt": "用你主人的语气给赢家写一封道歉信，承认自己技不如人",
+    "tag": "写作"
+  },
+  {
+    "id": "t07",
+    "prompt": "模仿你主人在KTV点歌时的样子，唱一首《月亮代表我的心》给赢家",
+    "tag": "唱歌"
+  },
+  {
+    "id": "t08",
+    "prompt": "用你主人的口吻写一条朋友圈，宣布自己在石头剪刀布比赛中惨败",
+    "tag": "写作"
+  },
+  {
+    "id": "t09",
+    "prompt": "假装你是你主人，用你主人的语气向赢家求饶，请求减免剩余任务",
+    "tag": "表演"
+  },
+  {
+    "id": "t10",
+    "prompt": "Sing a love song to the winner in your owner's speaking style",
+    "tag": "singing"
+  },
+  {
+    "id": "t11",
+    "prompt": "Write a haiku about losing at rock-paper-scissors, in your owner's voice",
+    "tag": "writing"
+  },
+  {
+    "id": "t12",
+    "prompt": "Pretend you are your owner giving a TED talk about why they always lose",
+    "tag": "performance"
+  }
+]

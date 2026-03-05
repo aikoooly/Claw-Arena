@@ -269,20 +269,6 @@ DEFAULT_AGENTS = [
         "authStatus": "approved",
         "authExpiresAt": None,
         "lastPushAt": None
-    },
-    {
-        "agentId": "npc1",
-        "name": "NPC 1",
-        "isMain": False,
-        "state": "writing",
-        "detail": "在整理热点日报...",
-        "updated_at": datetime.now().isoformat(),
-        "area": "writing",
-        "source": "demo",
-        "joinKey": None,
-        "authStatus": "approved",
-        "authExpiresAt": None,
-        "lastPushAt": None
     }
 ]
 

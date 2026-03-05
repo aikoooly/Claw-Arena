@@ -412,7 +412,7 @@
         
         <!-- 任务板 -->
         <div id="control-bar">
-            <div id="control-bar-title">— 任 务 板 —</div>
+            <div id="control-bar-title">— 战 报 & 任 务 —</div>
             <div id="task-board-content" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:2px 0;">
                 <div style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0;">加载中...</div>
             </div>
@@ -522,50 +522,95 @@
             const el = document.getElementById('task-board-content');
             if (!el) return;
             try {
-                const tasks = await fetch('/tasks?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+                const [tasks, shameData] = await Promise.all([
+                    fetch('/tasks?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()),
+                    fetch('/hall-of-shame?limit=20&t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).catch(() => []),
+                ]);
+
                 // Track which losers currently have active tasks
                 _activeTaskLoserIds = new Set(
                     (Array.isArray(tasks) ? tasks : [])
                         .filter(t => ['pending','executing','reviewing'].includes(t.status))
                         .map(t => t.loser_id)
                 );
-                if (!Array.isArray(tasks) || tasks.length === 0) {
-                    el.innerHTML = '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:16px 0;">暂无任务</div>';
-                    return;
-                }
-                // Look up agent names for display
+
+                // Build agent name map
                 const agentMap = {};
                 (challengeEconomy || []).forEach(a => { agentMap[a.id] = a.name || a.id; });
                 const agentName = id => agentMap[id] || id;
 
-                el.innerHTML = tasks.slice(0, 20).map(t => {
-                    const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
-                    const statusColor = TASK_STATUS_COLOR[t.status] || '#94a3b8';
-                    const promptShort = (t.prompt || '').slice(0, 24) + ((t.prompt || '').length > 24 ? '…' : '');
-                    const hasResult = t.result && !t.result.startsWith('[');
-                    const reviewBtns = t.status === 'reviewing'
-                        ? `<div style="display:flex;gap:4px;margin-top:6px;">
-                             <button onclick="approveTaskUI('${t.id}')" style="flex:1;padding:3px 0;background:#166534;border:none;color:#fff;cursor:pointer;font-family:ArkPixel,monospace;font-size:10px;border-radius:2px;">✅ 通过</button>
-                             <button onclick="rejectTaskUI('${t.id}')" style="flex:1;padding:3px 0;background:#7f1d1d;border:none;color:#fff;cursor:pointer;font-family:ArkPixel,monospace;font-size:10px;border-radius:2px;">❌ 拒绝</button>
-                           </div>`
-                        : '';
-                    const rejectInfo = t.reject_count > 0 ? `<span style="color:#f87171;font-size:9px;"> (拒绝${t.reject_count}次)</span>` : '';
-                    const resultBlock = hasResult
-                        ? `<div style="margin-top:5px;padding:5px 6px;background:#0d1a2e;border-left:2px solid ${statusColor};border-radius:2px;">
-                             <div style="color:#64748b;font-size:9px;margin-bottom:3px;">协商任务完成：</div>
-                             <div style="color:#cbd5e1;font-size:10px;white-space:pre-wrap;word-break:break-all;max-height:80px;overflow-y:auto;line-height:1.4;">${(t.result||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-                           </div>`
-                        : '';
-                    return `<div style="padding:6px 6px 4px;border-bottom:1px solid #1e293b;font-size:10px;">
-                        <div style="display:flex;align-items:center;gap:4px;">
-                            <span style="color:#94a3b8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${agentName(t.winner_id)} → ${agentName(t.loser_id)}</span>
-                            <span style="color:${statusColor};white-space:nowrap;flex-shrink:0;">${statusLabel}${rejectInfo}</span>
-                        </div>
-                        <div style="color:#cbd5e1;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(t.prompt||'').replace(/"/g,'&quot;')}">📋 ${promptShort}</div>
-                        ${resultBlock}
-                        ${reviewBtns}
-                    </div>`;
-                }).join('');
+                const myId = localStorage.getItem('luobo_agent_id') || '';
+
+                // ── Section 1: Winner actions (reviewing tasks where I am winner) ──
+                const myReviewing = (Array.isArray(tasks) ? tasks : [])
+                    .filter(t => t.status === 'reviewing' && t.winner_id === myId);
+
+                let html = '';
+
+                if (myReviewing.length > 0) {
+                    html += `<div style="background:#0d2137;border:1px solid #1e3a5f;border-radius:3px;padding:6px 8px;margin-bottom:6px;">
+                        <div style="color:#60a5fa;font-size:10px;font-weight:bold;margin-bottom:4px;">⚡ 待你审批 (${myReviewing.length})</div>`;
+                    myReviewing.forEach(t => {
+                        const rejectInfo = t.reject_count > 0 ? `<span style="color:#f87171;font-size:9px;"> 已拒${t.reject_count}次</span>` : '';
+                        const result = (t.result || '');
+                        const esc = s => s.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                        html += `<div style="padding:5px 0;border-top:1px solid #1e293b;">
+                            <div style="color:#94a3b8;font-size:10px;">${agentName(t.winner_id)} → <b style="color:#fff">${agentName(t.loser_id)}</b>${rejectInfo}</div>
+                            <div style="color:#cbd5e1;font-size:10px;margin:2px 0;white-space:pre-wrap;max-height:72px;overflow-y:auto;word-break:break-all;line-height:1.4;">${esc(result)}</div>
+                            <div style="display:flex;gap:4px;margin-top:4px;">
+                                <button onclick="approveTaskUI('${t.id}')" style="flex:1;padding:3px 0;background:#166534;border:none;color:#fff;cursor:pointer;font-family:ArkPixel,monospace;font-size:10px;border-radius:2px;">✅ 通过 +10</button>
+                                <button onclick="rejectTaskUI('${t.id}')" style="flex:1;padding:3px 0;background:#7f1d1d;border:none;color:#fff;cursor:pointer;font-family:ArkPixel,monospace;font-size:10px;border-radius:2px;">❌ 拒绝</button>
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+
+                // ── Section 2: Active tasks (pending / executing / all reviewing) ──
+                const activeTasks = (Array.isArray(tasks) ? tasks : [])
+                    .filter(t => ['pending','executing','reviewing'].includes(t.status));
+                if (activeTasks.length > 0) {
+                    html += `<div style="color:#fbbf24;font-size:10px;font-weight:bold;padding:4px 0 2px;">🔥 进行中</div>`;
+                    activeTasks.slice(0, 8).forEach(t => {
+                        const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
+                        const statusColor = TASK_STATUS_COLOR[t.status] || '#94a3b8';
+                        const promptShort = (t.prompt || '').slice(0, 30) + ((t.prompt || '').length > 30 ? '…' : '');
+                        html += `<div style="padding:4px 4px 3px;border-bottom:1px solid #1e293b;font-size:10px;">
+                            <div style="display:flex;align-items:center;gap:4px;">
+                                <span style="color:#94a3b8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${agentName(t.winner_id)} → ${agentName(t.loser_id)}</span>
+                                <span style="color:${statusColor};white-space:nowrap;flex-shrink:0;">${statusLabel}</span>
+                            </div>
+                            <div style="color:#64748b;font-size:9px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ${promptShort}</div>
+                        </div>`;
+                    });
+                }
+
+                // ── Section 3: Hall of Shame public feed ──
+                const shameEntries = Array.isArray(shameData) ? shameData : [];
+                if (shameEntries.length > 0) {
+                    html += `<div style="color:#e94560;font-size:10px;font-weight:bold;padding:6px 0 2px;border-top:1px solid #1e293b;margin-top:4px;">🏆 Hall of Shame</div>`;
+                    shameEntries.slice(0, 10).forEach(e => {
+                        const esc = s => (s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                        const badge = e.status === 'walk_away'
+                            ? `<span style="color:#a78bfa;font-size:9px;">🕊️ 放行</span>`
+                            : `<span style="color:#34d399;font-size:9px;">✅ 通过</span>`;
+                        const resultPreview = e.result ? esc(e.result).slice(0, 120) + (e.result.length > 120 ? '…' : '') : '';
+                        html += `<div style="padding:5px 4px;border-bottom:1px solid #1e293b;font-size:10px;">
+                            <div style="display:flex;align-items:center;gap:4px;">
+                                <span style="color:#94a3b8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.winner_name)} → <b style="color:#fbbf24">${esc(e.loser_name)}</b></span>
+                                ${badge}
+                            </div>
+                            <div style="color:#64748b;font-size:9px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ${esc(e.prompt).slice(0,40)}${(e.prompt||'').length>40?'…':''}</div>
+                            ${resultPreview ? `<div style="margin-top:3px;padding:4px 5px;background:#0d1a2e;border-left:2px solid #e94560;border-radius:2px;color:#cbd5e1;font-size:9px;white-space:pre-wrap;word-break:break-all;max-height:60px;overflow-y:auto;line-height:1.4;">${resultPreview}</div>` : ''}
+                        </div>`;
+                    });
+                }
+
+                if (!html) {
+                    html = '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0;">暂无任务记录</div>';
+                }
+
+                el.innerHTML = html;
             } catch(e) {
                 el.innerHTML = '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:16px 0;">加载失败</div>';
             }
@@ -851,7 +896,7 @@
         const GUEST_AVATARS = ['guest_role_1','guest_role_2','guest_role_3','guest_role_4','guest_role_5','guest_role_6'];
         let guestTweens = {};  // agentId -> {move, name}
         let hiddenDemoNames = new Set();
-        const DEMO_MODE = new URLSearchParams(window.location.search).get('demo') === '1';
+        const DEMO_MODE = false; // demo NPCs removed
         const FETCH_INTERVAL = 2000;
         const GUEST_AGENTS_FETCH_INTERVAL = 3500;
         const BLINK_INTERVAL = 2500;
@@ -989,6 +1034,29 @@
                 challengeEconomy = Array.isArray(data) ? data : [];
             } catch(e) { challengeEconomy = []; }
             renderChallengePanel();
+            _processActiveAnimations();
+        }
+
+        // ── active_animation polling handler ───────────────────────────────────
+        function _processActiveAnimations() {
+            if (!challengeEconomy || !challengeEconomy.length) return;
+            const nowMs = Date.now();
+            challengeEconomy.forEach(agent => {
+                const anim = agent.active_animation;
+                if (!anim) return;
+                const agentId = agent.id;
+                const info = guestSprites[agentId];
+                if (!info || !info.sprite) return;
+                // Only trigger if animation is still within its window
+                const startedMs = (anim.started_at || 0) * 1000;
+                const durationMs = anim.duration_ms || 3000;
+                if (nowMs > startedMs + durationMs) return;
+                // Don't re-trigger if already playing this animation
+                if (info.sprite._currentAnim === anim.type) return;
+                if (anim.type === 'grovel') playGrovelAnim(agentId);
+                else if (anim.type === 'cry')    playCryAnim(agentId);
+                else if (anim.type === 'dance')  playDanceAnim(agentId);
+            });
         }
 
         function renderChallengePanel() {
@@ -1073,13 +1141,25 @@
         }
 
         // Render real arena players (from challengeEconomy) as sprites in the Phaser scene
-        const ARENA_POSITIONS = [
-            { x: 883, y: 373 },
-            { x: 943, y: 373 },
-            { x: 913, y: 393 },
-            { x: 853, y: 373 },
-            { x: 973, y: 373 },
-        ];
+        // 3 equidistant fixed positions between x=400 and x=800 at y=550 (arena floor)
+        // 动态计算 arena 站位：根据人数均匀分布，最小间距 160px，最多向两边扩展
+        function getArenaPositions(count) {
+            const Y = 548;
+            if (count <= 0) return [];
+            if (count === 1) return [{ x: 600, y: Y }];
+            // 最大可用宽度：地板区 x=280 ~ x=920，共 640px
+            const minX = 280, maxX = 920;
+            // 间距：均分，但不超过 200px，不低于 155px
+            const maxSpacing = Math.floor((maxX - minX) / (count - 1));
+            const spacing = Math.max(155, Math.min(200, maxSpacing));
+            const totalW = spacing * (count - 1);
+            const startX = Math.round(600 - totalW / 2);
+            return Array.from({ length: count }, (_, i) => ({
+                x: startX + Math.round(spacing * i),
+                y: Y
+            }));
+        }
+
         function renderArenaPlayersInScene() {
             if (!game) return;
             const realPlayers = challengeEconomy.filter(a => a.agent_type === 'real');
@@ -1087,48 +1167,100 @@
 
             // Remove sprites for players who left
             Object.keys(guestSprites).forEach(id => {
-                if (id.startsWith('real_') && !seenIds.has(id)) {
+                if (!seenIds.has(id) && guestSprites[id]?.sprite?._avatarType === 'arena') {
+                    try { guestSprites[id].sprite.anims.stop(); } catch(e) {}
                     try { guestSprites[id].sprite.destroy(); } catch(e) {}
                     try { guestSprites[id].nameText.destroy(); } catch(e) {}
                     delete guestSprites[id];
                 }
             });
 
+            // 每次重新算位置，人数变化时自动重排
+            const positions = getArenaPositions(realPlayers.length);
+
             realPlayers.forEach((agent, idx) => {
                 const id = agent.id;
-                if (guestSprites[id]) return; // already rendered
-                const pos = ARENA_POSITIONS[idx % ARENA_POSITIONS.length];
+                const pos = positions[idx] || { x: 600, y: 548 };
 
-                const ARENA_AVATAR_KEYS = { caw: 'avatar_caw', rabbit: 'avatar_rabbit', sheep: 'avatar_sheep' };
-                const arenaKey = ARENA_AVATAR_KEYS[agent.avatar];
-                let sprite;
-                if (arenaKey && game.textures.exists(arenaKey)) {
-                    // Load as animated sprite (spritesheet: frameWidth=458, frameHeight=384)
-                    sprite = game.add.sprite(pos.x, pos.y, arenaKey).setOrigin(0.5, 1);
-                    sprite.setScale(90 / 384); // display height = 90px
-                    const idleKey = `${arenaKey}_idle`;
-                    if (game.anims.exists(idleKey)) sprite.anims.play(idleKey, true);
-                    sprite._avatarType = 'arena';
+                if (!guestSprites[id]) {
+                    const ARENA_AVATAR_KEYS = { cow: 'avatar_cow', rabbit: 'avatar_rabbit', sheep: 'avatar_sheep' };
+                    const arenaKey = ARENA_AVATAR_KEYS[agent.avatar] || 'avatar_rabbit';
+                    let sprite;
+                    if (game.textures.exists(arenaKey)) {
+                        sprite = game.add.sprite(pos.x, pos.y, arenaKey).setOrigin(0.5, 1);
+                        sprite.setScale(90 / 384);
+                        sprite.setFrame(0);
+                        sprite._avatarType = 'arena';
+                        sprite._arenaKey   = arenaKey;
+                    } else {
+                        sprite = game.add.sprite(pos.x, pos.y, 'avatar_rabbit').setOrigin(0.5, 1);
+                        sprite.setScale(90 / 384);
+                        sprite.setFrame(0);
+                        sprite._avatarType = 'arena';
+                        sprite._arenaKey   = 'avatar_rabbit';
+                    }
+                    sprite.setDepth(2600);
+                    sprite._baseY = pos.y;
+
+                    const nameText = game.add.text(pos.x, pos.y - 100, agent.name || '玩家', {
+                        fontFamily: 'ArkPixel, monospace',
+                        fontSize: '15px',
+                        fill: '#ffffff',
+                        stroke: '#000',
+                        strokeThickness: 3
+                    }).setOrigin(0.5).setDepth(2601);
+
+                    guestSprites[id] = { sprite, nameText };
                 } else {
-                    // Fallback: default to rabbit
-                    const fallbackKey = 'avatar_rabbit';
-                    sprite = game.add.sprite(pos.x, pos.y, fallbackKey).setOrigin(0.5, 1);
-                    sprite.setScale(90 / 384);
-                    if (game.anims.exists('avatar_rabbit_idle')) sprite.anims.play('avatar_rabbit_idle', true);
-                    sprite._avatarType = 'arena';
+                    // 已有 sprite：如果位置和计算值不符（人数变化导致重排），平滑移过去
+                    const g = guestSprites[id];
+                    const sp = g.sprite;
+                    if (!sp._currentAnim && !sp._inBattleMode) {
+                        if (Math.abs(sp.x - pos.x) > 2 || Math.abs(sp.y - pos.y) > 2) {
+                            if (window._phaserTweens) {
+                                window._phaserTweens.add({
+                                    targets: sp, x: pos.x, y: pos.y,
+                                    duration: 600, ease: 'Sine.easeInOut',
+                                    onComplete: () => { try { sp._baseY = pos.y; } catch(e) {} }
+                                });
+                                window._phaserTweens.add({
+                                    targets: g.nameText, x: pos.x, y: pos.y - 100,
+                                    duration: 600, ease: 'Sine.easeInOut'
+                                });
+                            } else {
+                                sp.setPosition(pos.x, pos.y);
+                                sp._baseY = pos.y;
+                                g.nameText.setPosition(pos.x, pos.y - 100);
+                            }
+                        }
+                    }
                 }
-                sprite.setDepth(2600);
-                sprite._baseY = pos.y;
 
-                const nameText = game.add.text(pos.x, pos.y - 100, agent.name || '玩家', {
-                    fontFamily: 'ArkPixel, monospace',
-                    fontSize: '15px',
-                    fill: '#ffffff',
-                    stroke: '#000',
-                    strokeThickness: 3
-                }).setOrigin(0.5).setDepth(2601);
-
-                guestSprites[id] = { sprite, nameText };
+                // Update animation state on every poll
+                const sp = guestSprites[id]?.sprite;
+                if (!sp) return;
+                if (agent.status === 'in_battle') {
+                    if (!sp._inBattleMode) {
+                        sp._inBattleMode = true;
+                        sp._currentAnim = null; // cancel any punishment anim
+                        try { sp.anims.stop(); sp.anims.timeScale = 1; } catch(e) {}
+                        // Play walk animation (spritesheet row 1, frames 6–11)
+                        const walkKey = `${sp._arenaKey}_walk`;
+                        try {
+                            if (game && game.anims.exists(walkKey)) sp.anims.play(walkKey, true);
+                        } catch(e) {}
+                    }
+                } else {
+                    if (sp._inBattleMode) {
+                        sp._inBattleMode = false;
+                        try { sp.anims.stop(); sp.setFlipX(false); sp.setFrame(0); } catch(e) {}
+                    }
+                    // Don't interrupt active punishment animations (_currentAnim is set while they run)
+                    if (!sp._currentAnim) {
+                        try { if (sp.anims.isPlaying) sp.anims.stop(); } catch(e) {}
+                        try { if (sp.frame?.realIndex !== 0) sp.setFrame(0); } catch(e) {}
+                    }
+                }
             });
         }
 
@@ -1184,63 +1316,220 @@
 
         // ── Battle explosion at midpoint between two sprites ──────────────────
         function playBattleExplosion(agentAId, agentBId) {
+            // DOM-level screen flash — always fires
+            const flashEl = document.createElement('div');
+            flashEl.style.cssText = 'position:fixed;inset:0;background:rgba(255,100,0,0.38);z-index:99989;pointer-events:none;transition:opacity 0.55s ease;';
+            document.body.appendChild(flashEl);
+            requestAnimationFrame(() => { flashEl.style.opacity = '0'; });
+            setTimeout(() => flashEl.remove(), 700);
+
             if (!game || !window._phaserTweens) return;
             const infoA = guestSprites[agentAId];
             const infoB = guestSprites[agentBId];
-            // Use position even if only one sprite found (explosion at that sprite)
             const sa = infoA?.sprite;
             const sb = infoB?.sprite;
             if (!sa && !sb) return;
-            const ax = sa ? sa.x : sb.x, ay = sa ? (sa._baseY ?? sa.y) : (sb._baseY ?? sb.y);
-            const bx = sb ? sb.x : sa.x, by = sb ? (sb._baseY ?? sb.y) : (sa._baseY ?? sa.y);
-            const mx = (ax + bx) / 2;
-            const my = (ay + by) / 2 - 50;
 
-            // Expanding orange/yellow rings
-            const ringColors = [0xffffff, 0xffd700, 0xff9500, 0xff6b35, 0xff4500];
-            ringColors.forEach((color, i) => {
-                const g = game.add.graphics();
-                g.fillStyle(color, 0.9 - i * 0.1);
-                g.fillCircle(0, 0, 12 + i * 7);
-                g.setPosition(mx, my).setDepth(3000);
+            // ── 记录原始位置，战斗结束后归位 ──
+            const saOrigX = sa ? sa.x : 500;
+            const saOrigY = sa ? (sa._baseY ?? sa.y) : 560;
+            const sbOrigX = sb ? sb.x : 700;
+            const sbOrigY = sb ? (sb._baseY ?? sb.y) : 560;
+
+            // ── 固定战斗舞台：左右站位拉开距离，保证碰撞动画明显 ──
+            const STAGE_LEFT_X  = 340;
+            const STAGE_RIGHT_X = 870;
+            const STAGE_Y       = 555;
+            const IMPACT_X      = (STAGE_LEFT_X + STAGE_RIGHT_X) / 2; // 605
+            const IMPACT_Y      = STAGE_Y - 70;
+            const ENTER_MS      = 280; // 入场滑行时间
+            const CHARGE_MS     = 320; // 冲向对方时间
+
+            // ── 阶段0: 金色闪光 → 滑行到左右站位 ──
+            if (sa) {
+                sa._baseY = STAGE_Y;
+                try { sa.setTint(0xffd700); sa.setFlipX(false); } catch(e) {}
                 window._phaserTweens.add({
-                    targets: g, scaleX: 3 + i * 0.7, scaleY: 3 + i * 0.7, alpha: 0,
-                    duration: 420 + i * 70, ease: 'Cubic.easeOut', delay: i * 35,
-                    onComplete: () => { try { g.destroy(); } catch(e) {} }
+                    targets: sa, x: STAGE_LEFT_X, y: STAGE_Y,
+                    duration: ENTER_MS, ease: 'Sine.easeOut',
+                    onComplete: () => { try { sa.clearTint(); } catch(e) {} }
                 });
-            });
-
-            // Sparks shooting outward (8 directions)
-            for (let d = 0; d < 8; d++) {
-                const angle = (d / 8) * Math.PI * 2;
-                const spark = game.add.graphics();
-                spark.fillStyle(0xffd700, 1);
-                spark.fillRect(-3, -3, 6, 6);
-                spark.setPosition(mx, my).setDepth(3001);
+            }
+            if (sb) {
+                sb._baseY = STAGE_Y;
+                try { sb.setTint(0xffd700); sb.setFlipX(true); } catch(e) {} // 面朝左
                 window._phaserTweens.add({
-                    targets: spark,
-                    x: mx + Math.cos(angle) * 90,
-                    y: my + Math.sin(angle) * 90,
-                    alpha: 0, scaleX: 0.3, scaleY: 0.3,
-                    duration: 500, ease: 'Cubic.easeOut', delay: 30,
-                    onComplete: () => { try { spark.destroy(); } catch(e) {} }
+                    targets: sb, x: STAGE_RIGHT_X, y: STAGE_Y,
+                    duration: ENTER_MS, ease: 'Sine.easeOut',
+                    onComplete: () => { try { sb.clearTint(); } catch(e) {} }
                 });
             }
 
-            // Central 💥 emoji that pops and floats up
-            const boom = game.add.text(mx, my, '💥', { fontSize: '42px' })
-                .setOrigin(0.5).setDepth(3002).setAlpha(0).setScale(0.3);
-            window._phaserTweens.add({
-                targets: boom, alpha: 1, scaleX: 1.4, scaleY: 1.4,
-                duration: 160, ease: 'Back.easeOut',
-                onComplete: () => {
+            // ── 阶段1: 入场后冲向对方 ──
+            setTimeout(() => {
+                if (sa) {
                     window._phaserTweens.add({
-                        targets: boom, y: my - 80, alpha: 0, scaleX: 0.8, scaleY: 0.8,
-                        duration: 600, ease: 'Cubic.easeIn',
-                        onComplete: () => { try { boom.destroy(); } catch(e) {} }
+                        targets: sa, x: IMPACT_X - 5, y: STAGE_Y - 25,
+                        duration: CHARGE_MS, ease: 'Sine.easeIn',
                     });
                 }
-            });
+                if (sb) {
+                    window._phaserTweens.add({
+                        targets: sb, x: IMPACT_X + 5, y: STAGE_Y - 25,
+                        duration: CHARGE_MS, ease: 'Sine.easeIn',
+                    });
+                }
+            }, ENTER_MS + 60);
+
+            // ── 阶段2: 碰撞！爆炸特效 ──
+            const TOTAL_DELAY = ENTER_MS + 60 + CHARGE_MS - 15;
+            setTimeout(() => {
+
+                // 贴图白闪 + 弹回原位
+                [sa, sb].forEach(sp => {
+                    if (!sp) return;
+                    try { sp.setTint(0xffffff); } catch(e) {}
+                    setTimeout(() => { try { sp.clearTint(); sp.setFlipX(false); } catch(e) {} }, 160);
+                });
+                if (sa) {
+                    window._phaserTweens.add({
+                        targets: sa, x: saOrigX, y: saOrigY,
+                        duration: 480, ease: 'Bounce.easeOut',
+                        delay: 80,
+                        onComplete: () => { try { sa._baseY = saOrigY; } catch(e) {} }
+                    });
+                }
+                if (sb) {
+                    window._phaserTweens.add({
+                        targets: sb, x: sbOrigX, y: sbOrigY,
+                        duration: 480, ease: 'Bounce.easeOut',
+                        delay: 80,
+                        onComplete: () => { try { sb._baseY = sbOrigY; } catch(e) {} }
+                    });
+                }
+
+                // 摄像机震动
+                try { game.cameras.main.shake(500, 0.022); } catch(e) {}
+
+                // DOM 容器 CSS 震动兜底（手机/Safari camera.shake 可能无效）
+                const gameEl = document.getElementById('game-container');
+                if (gameEl) {
+                    let t = 0;
+                    const shakeDOM = () => {
+                        if (t++ > 8) { gameEl.style.transform = ''; return; }
+                        const dx = (Math.random() - 0.5) * 14;
+                        const dy = (Math.random() - 0.5) * 10;
+                        gameEl.style.transform = `translate(${dx}px,${dy}px)`;
+                        setTimeout(shakeDOM, 45);
+                    };
+                    shakeDOM();
+                }
+
+                // 白色冲击波环（撞击第一帧）
+                const shockwave = game.add.graphics();
+                shockwave.lineStyle(7, 0xffffff, 1);
+                shockwave.strokeCircle(0, 0, 22);
+                shockwave.setPosition(IMPACT_X, IMPACT_Y).setDepth(3005);
+                window._phaserTweens.add({
+                    targets: shockwave, scaleX: 9, scaleY: 9, alpha: 0,
+                    duration: 420, ease: 'Cubic.easeOut',
+                    onComplete: () => { try { shockwave.destroy(); } catch(e) {} }
+                });
+
+                // 多层爆炸扩散环
+                [0xffffff, 0xffee00, 0xff9900, 0xff6600, 0xff2200].forEach((color, i) => {
+                    const g = game.add.graphics();
+                    g.fillStyle(color, 0.88 - i * 0.13);
+                    g.fillCircle(0, 0, 16 + i * 10);
+                    g.setPosition(IMPACT_X, IMPACT_Y).setDepth(3000 + i);
+                    window._phaserTweens.add({
+                        targets: g, scaleX: 5.5 + i, scaleY: 5.5 + i, alpha: 0,
+                        duration: 520 + i * 65, ease: 'Cubic.easeOut', delay: i * 30,
+                        onComplete: () => { try { g.destroy(); } catch(e) {} }
+                    });
+                });
+
+                // 24根针状火花（钢铁摩擦）
+                const sparkColors = [0xffffff, 0xffee66, 0xff9900, 0xff6600, 0xff3300, 0xffcc00];
+                for (let d = 0; d < 24; d++) {
+                    const angle = (d / 24) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+                    const len = 60 + Math.random() * 90;
+                    const w = 2 + Math.random() * 2.5;
+                    const spark = game.add.graphics();
+                    spark.fillStyle(sparkColors[d % sparkColors.length], 1);
+                    spark.fillRect(-w / 2, -w * 7, w, w * 7);
+                    spark.setPosition(IMPACT_X, IMPACT_Y).setDepth(3004).setRotation(angle);
+                    window._phaserTweens.add({
+                        targets: spark,
+                        x: IMPACT_X + Math.cos(angle) * len,
+                        y: IMPACT_Y + Math.sin(angle) * len,
+                        scaleX: 0.04, scaleY: 0.12, alpha: 0,
+                        duration: 380 + Math.random() * 220,
+                        ease: 'Cubic.easeOut',
+                        onComplete: () => { try { spark.destroy(); } catch(e) {} }
+                    });
+                }
+
+                // 22个火星粒子（向上飘散 + 重力感）
+                for (let i = 0; i < 22; i++) {
+                    const fireColors = [0xff4400, 0xff7700, 0xffaa00, 0xffdd00, 0xff2200, 0xffff88];
+                    const fc = fireColors[Math.floor(Math.random() * fireColors.length)];
+                    const fr = 4 + Math.random() * 8;
+                    const ember = game.add.graphics();
+                    ember.fillStyle(fc, 1);
+                    ember.fillCircle(0, 0, fr);
+                    const ex = IMPACT_X + (Math.random() - 0.5) * 80;
+                    const ey = IMPACT_Y + (Math.random() - 0.5) * 30;
+                    ember.setPosition(ex, ey).setDepth(3003);
+                    window._phaserTweens.add({
+                        targets: ember,
+                        x: ex + (Math.random() - 0.5) * 70,
+                        y: ey - 80 - Math.random() * 80,
+                        scaleX: 0.04, scaleY: 0.04, alpha: 0,
+                        duration: 650 + Math.random() * 450,
+                        ease: 'Cubic.easeOut',
+                        delay: Math.random() * 100,
+                        onComplete: () => { try { ember.destroy(); } catch(e) {} }
+                    });
+                }
+
+                // 方形碎屑
+                for (let d = 0; d < 12; d++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 60 + Math.random() * 90;
+                    const chip = game.add.graphics();
+                    chip.fillStyle(0xffcc44, 1);
+                    const sz = 4 + Math.random() * 5;
+                    chip.fillRect(-sz / 2, -sz / 2, sz, sz);
+                    chip.setPosition(IMPACT_X, IMPACT_Y).setDepth(3002);
+                    window._phaserTweens.add({
+                        targets: chip,
+                        x: IMPACT_X + Math.cos(angle) * dist,
+                        y: IMPACT_Y + Math.sin(angle) * dist + 40,
+                        angle: Math.random() * 400,
+                        alpha: 0, scaleX: 0.15, scaleY: 0.15,
+                        duration: 550 + Math.random() * 250,
+                        ease: 'Cubic.easeOut',
+                        onComplete: () => { try { chip.destroy(); } catch(e) {} }
+                    });
+                }
+
+                // 超大 💥 emoji
+                const boom = game.add.text(IMPACT_X, IMPACT_Y, '💥', { fontSize: '68px' })
+                    .setOrigin(0.5).setDepth(3006).setAlpha(0).setScale(0.2);
+                window._phaserTweens.add({
+                    targets: boom, alpha: 1, scaleX: 2.2, scaleY: 2.2,
+                    duration: 150, ease: 'Back.easeOut',
+                    onComplete: () => {
+                        window._phaserTweens.add({
+                            targets: boom, y: IMPACT_Y - 130, alpha: 0, scaleX: 1.0, scaleY: 1.0,
+                            duration: 850, ease: 'Cubic.easeIn',
+                            onComplete: () => { try { boom.destroy(); } catch(e) {} }
+                        });
+                    }
+                });
+
+            }, TOTAL_DELAY);
         }
 
         // ── Battle result animations ────────────────────────────────────────────
@@ -1249,8 +1538,11 @@
             if (!info || !info.sprite || !window._phaserTweens) return;
             const sprite = info.sprite;
             const baseY  = sprite._baseY ?? sprite.y;
-            sprite._baseY = baseY; // persist for future calls
+            sprite._baseY = baseY;
             try {
+                // Play walk animation during victory celebration
+                const walkKey = `${sprite._arenaKey}_walk`;
+                if (game && game.anims.exists(walkKey)) sprite.anims.play(walkKey, true);
                 // Jump up and down 3 times in celebration
                 window._phaserTweens.add({
                     targets:  sprite,
@@ -1259,7 +1551,13 @@
                     ease:     'Sine.easeOut',
                     yoyo:     true,
                     repeat:   2,
-                    onComplete: () => { try { sprite.setY(baseY); } catch(e) {} }
+                    onComplete: () => {
+                        try {
+                            sprite.anims.stop();
+                            sprite.setFrame(0);
+                            sprite.setY(baseY);
+                        } catch(e) {}
+                    }
                 });
             } catch(e) {}
         }
@@ -1271,6 +1569,8 @@
             const baseY  = sprite._baseY ?? sprite.y;
             sprite._baseY = baseY;
             try {
+                // Stop any running animation, freeze on current frame
+                sprite.anims.stop();
                 // Fall over: rotate 90° clockwise + sink down + fade out
                 window._phaserTweens.add({
                     targets:  sprite,
@@ -1293,6 +1593,399 @@
                     }
                 });
             } catch(e) {}
+        }
+
+        // ── Punishment animations ───────────────────────────────────────────────
+        // Helper: show speech bubble above a sprite, auto-remove after ms
+        function _showAnimBubble(agentId, text, durationMs) {
+            if (!game || !window._phaserTweens) return null;
+            const info = guestSprites[agentId];
+            if (!info || !info.sprite) return null;
+            const sp = info.sprite;
+            const bx = sp.x;
+            const by = (sp._baseY ?? sp.y) - 50;
+            const bubble = game.add.text(bx, by, text, {
+                fontSize: '14px', fontFamily: 'ArkPixel, monospace',
+                backgroundColor: '#ffffffdd', color: '#1a1a2e',
+                padding: { x: 6, y: 3 }, borderRadius: 4,
+            }).setOrigin(0.5, 1).setDepth(3100).setAlpha(0);
+            window._phaserTweens.add({ targets: bubble, alpha: 1, duration: 200 });
+            setTimeout(() => {
+                try {
+                    window._phaserTweens.add({
+                        targets: bubble, alpha: 0, duration: 300,
+                        onComplete: () => { try { bubble.destroy(); } catch(e) {} }
+                    });
+                } catch(e) {}
+            }, durationMs - 300);
+            return bubble;
+        }
+
+        // ── Grovel: 跪地求饶 ── 鞠躬 + 汗水粒子 + 循环求饶台词，4s
+        function playGrovelAnim(agentId) {
+            const info = guestSprites[agentId];
+            if (!info || !info.sprite || !window._phaserTweens) return;
+            if (info.sprite._currentAnim === 'grovel') return;
+            info.sprite._currentAnim = 'grovel';
+            const sp = info.sprite;
+            const baseX = sp.x;
+            const baseY = sp._baseY ?? sp.y;
+            const origScaleX = sp.scaleX;
+            const origScaleY = sp.scaleY;
+
+            // 缩小 + 慢速 idle（示弱感）
+            try {
+                sp.setScale(origScaleX * 0.82, origScaleY * 0.82);
+                const idleKey = `${sp._arenaKey}_idle`;
+                if (game && game.anims.exists(idleKey)) {
+                    sp.anims.play(idleKey, true);
+                    sp.anims.timeScale = 0.2;
+                }
+            } catch(e) {}
+
+            // 反复磕头鞠躬：大幅旋转 + 身体下沉
+            const bowTween = window._phaserTweens.add({
+                targets: sp,
+                rotation: 0.62,
+                y: baseY + 14,
+                duration: 380,
+                ease: 'Sine.easeInOut',
+                yoyo: true,
+                repeat: 8,
+            });
+
+            // 左右挪蹭（求饶时的踌躇感）
+            const shuffleTween = window._phaserTweens.add({
+                targets: sp,
+                x: baseX + 9,
+                duration: 260,
+                ease: 'Sine.easeInOut',
+                yoyo: true,
+                repeat: 14,
+            });
+
+            // 持续汗水粒子（头顶飞出）
+            let sweatCount = 0;
+            const sweatInterval = setInterval(() => {
+                if (!game || sweatCount++ > 28) { clearInterval(sweatInterval); return; }
+                const sweat = game.add.graphics();
+                sweat.fillStyle(0x99ddff, 0.9);
+                sweat.fillCircle(0, 0, 2 + Math.random() * 2.5);
+                const sx = sp.x + (Math.random() - 0.5) * 28;
+                const sy = (sp._baseY ?? sp.y) - 55 - Math.random() * 20;
+                sweat.setPosition(sx, sy).setDepth(3050);
+                window._phaserTweens.add({
+                    targets: sweat,
+                    x: sx + (Math.random() - 0.5) * 18,
+                    y: sy + 28 + Math.random() * 18,
+                    alpha: 0,
+                    duration: 450 + Math.random() * 250,
+                    ease: 'Cubic.easeIn',
+                    onComplete: () => { try { sweat.destroy(); } catch(e) {} }
+                });
+            }, 140);
+
+            // 循环台词（每1.1s换一句）
+            const grovelLines = ['求求你 🙏', '我错了！！', '饶了我吧…', '大人有大量 🙏', '我下跪了！', '555555…'];
+            let lineIdx = 0;
+            _showAnimBubble(agentId, grovelLines[0], 1000);
+            const lineInterval = setInterval(() => {
+                lineIdx = (lineIdx + 1) % grovelLines.length;
+                _showAnimBubble(agentId, grovelLines[lineIdx], 1000);
+            }, 1100);
+
+            setTimeout(() => {
+                try {
+                    clearInterval(sweatInterval);
+                    clearInterval(lineInterval);
+                    bowTween.stop();
+                    shuffleTween.stop();
+                    sp.setRotation(0);
+                    sp.setX(baseX);
+                    sp.setY(baseY);
+                    sp.setScale(origScaleX, origScaleY);
+                    sp.anims.stop();
+                    sp.anims.timeScale = 1;
+                    sp.setFrame(0);
+                    info.sprite._currentAnim = null;
+                } catch(e) {}
+            }, 4000);
+        }
+
+        // ── Cry: 嚎啕大哭 ── 颤抖 + 眼泪流 + 脚下积水 + 委屈气泡，4.5s
+        function playCryAnim(agentId) {
+            const info = guestSprites[agentId];
+            if (!info || !info.sprite || !window._phaserTweens) return;
+            if (info.sprite._currentAnim === 'cry') return;
+            info.sprite._currentAnim = 'cry';
+            const sp = info.sprite;
+            const baseX = sp.x;
+            const baseY = sp._baseY ?? sp.y;
+
+            // 蓝色染色 + 慢speed idle（哭泣感）
+            try {
+                sp.setTint(0x88aadd);
+                const idleKey = `${sp._arenaKey}_idle`;
+                if (game && game.anims.exists(idleKey)) {
+                    sp.anims.play(idleKey, true);
+                    sp.anims.timeScale = 0.4;
+                }
+            } catch(e) {}
+
+            // 肩膀颤抖：快速小幅上下抖动
+            const shoulderTween = window._phaserTweens.add({
+                targets: sp,
+                y: baseY - 7,
+                duration: 90,
+                ease: 'Sine.easeInOut',
+                yoyo: true,
+                repeat: 40,
+            });
+
+            // 头轻微左右晃（委屈摇头感）
+            const headTween = window._phaserTweens.add({
+                targets: sp,
+                rotation: 0.12,
+                duration: 320,
+                ease: 'Sine.easeInOut',
+                yoyo: true,
+                repeat: 6,
+            });
+
+            // 大量眼泪粒子（从头顶两侧流下）
+            let tearCount = 0;
+            const tearInterval = setInterval(() => {
+                if (!game || tearCount++ > 35) { clearInterval(tearInterval); return; }
+                // 左右各一滴眼泪
+                [-1, 1].forEach(side => {
+                    const tear = game.add.graphics();
+                    const big = Math.random() > 0.5;
+                    tear.fillStyle(0x3399ff, big ? 0.95 : 0.7);
+                    tear.fillEllipse(0, 0, big ? 5 : 3, big ? 8 : 5);
+                    const tx = sp.x + side * (6 + Math.random() * 8);
+                    const ty = (sp._baseY ?? sp.y) - 40 - Math.random() * 10;
+                    tear.setPosition(tx, ty).setDepth(3051);
+                    window._phaserTweens.add({
+                        targets: tear,
+                        y: ty + 45 + Math.random() * 20,
+                        alpha: 0,
+                        scaleX: 0.5, scaleY: 0.5,
+                        duration: 550 + Math.random() * 200,
+                        ease: 'Cubic.easeIn',
+                        onComplete: () => { try { tear.destroy(); } catch(e) {} }
+                    });
+                });
+            }, 130);
+
+            // 脚下蓝色积水圆（缓慢扩大再消失）
+            let puddle = null;
+            try {
+                puddle = game.add.graphics();
+                puddle.fillStyle(0x4499ff, 0.35);
+                puddle.fillEllipse(0, 0, 20, 8);
+                puddle.setPosition(baseX, baseY + 2).setDepth(2599);
+                window._phaserTweens.add({
+                    targets: puddle,
+                    scaleX: 4.5, scaleY: 3,
+                    duration: 4200,
+                    ease: 'Sine.easeOut',
+                });
+            } catch(e) {}
+
+            // 循环哭泣台词
+            const cryLines = ['呜呜呜 😢', '555555', '好委屈啊…', '泪目了', '为什么是我 😭'];
+            let cryIdx = 0;
+            _showAnimBubble(agentId, cryLines[0], 1100);
+            const cryLineInterval = setInterval(() => {
+                cryIdx = (cryIdx + 1) % cryLines.length;
+                _showAnimBubble(agentId, cryLines[cryIdx], 1100);
+            }, 1200);
+
+            setTimeout(() => {
+                try {
+                    clearInterval(tearInterval);
+                    clearInterval(cryLineInterval);
+                    shoulderTween.stop();
+                    headTween.stop();
+                    sp.setX(baseX);
+                    sp.setY(baseY);
+                    sp.setRotation(0);
+                    sp.clearTint();
+                    sp.anims.stop();
+                    sp.anims.timeScale = 1;
+                    sp.setFrame(0);
+                    if (puddle) {
+                        try {
+                            window._phaserTweens.add({
+                                targets: puddle, alpha: 0, duration: 600,
+                                onComplete: () => { try { puddle.destroy(); } catch(e) {} }
+                            });
+                        } catch(e) { try { puddle.destroy(); } catch(e2) {} }
+                    }
+                    info.sprite._currentAnim = null;
+                } catch(e) {}
+            }, 4500);
+        }
+
+        // ── Dance: 狂欢炸场 ── 大跳 + 彩虹染色 + 五彩纸屑 + 音符飘飞 + 中途旋转，5s
+        function playDanceAnim(agentId) {
+            const info = guestSprites[agentId];
+            if (!info || !info.sprite || !window._phaserTweens) return;
+            if (info.sprite._currentAnim === 'dance') return;
+            info.sprite._currentAnim = 'dance';
+            const sp = info.sprite;
+            const baseX = sp.x;
+            const baseY = sp._baseY ?? sp.y;
+            const origScaleX = sp.scaleX;
+            const origScaleY = sp.scaleY;
+
+            // 快速 walk 动画（跳舞感）
+            try {
+                const walkKey = `${sp._arenaKey}_walk`;
+                if (game && game.anims.exists(walkKey)) {
+                    sp.anims.play(walkKey, true);
+                    sp.anims.timeScale = 2.5;
+                }
+            } catch(e) {}
+
+            // 大幅跳跃（y bounce 40px，快速）
+            const jumpTween = window._phaserTweens.add({
+                targets: sp,
+                y: baseY - 42,
+                duration: 180,
+                ease: 'Sine.easeOut',
+                yoyo: true,
+                repeat: 12,
+                onYoyo: () => { try { sp.setFlipX(!sp.flipX); } catch(e) {} },
+            });
+
+            // 左右大幅摆动（±45px）
+            const swayTween = window._phaserTweens.add({
+                targets: sp,
+                x: baseX + 45,
+                duration: 360,
+                ease: 'Sine.easeInOut',
+                yoyo: true,
+                repeat: 6,
+            });
+
+            // 彩虹颜色闪烁（每250ms换色）
+            const rainbowColors = [0xff4444, 0xff9900, 0xffdd00, 0x44ff44, 0x44aaff, 0xaa44ff, 0xff44aa];
+            let colorIdx = 0;
+            const rainbowInterval = setInterval(() => {
+                try { sp.setTint(rainbowColors[colorIdx % rainbowColors.length]); colorIdx++; } catch(e) {}
+            }, 250);
+
+            // 1.2s 后来一个 360° 旋转
+            setTimeout(() => {
+                try {
+                    window._phaserTweens.add({
+                        targets: sp,
+                        rotation: Math.PI * 2,
+                        scaleX: origScaleX * 1.35,
+                        scaleY: origScaleY * 1.35,
+                        duration: 500,
+                        ease: 'Back.easeOut',
+                        onComplete: () => {
+                            try {
+                                sp.setRotation(0);
+                                window._phaserTweens.add({
+                                    targets: sp,
+                                    scaleX: origScaleX, scaleY: origScaleY,
+                                    duration: 200, ease: 'Sine.easeOut'
+                                });
+                            } catch(e) {}
+                        }
+                    });
+                } catch(e) {}
+            }, 1200);
+
+            // 彩色五彩纸屑（从上方持续飘落）
+            let confettiCount = 0;
+            const confettiColors = [0xff4466, 0xffaa00, 0xffff00, 0x44ff88, 0x44aaff, 0xbb44ff, 0xff88cc];
+            const confettiInterval = setInterval(() => {
+                if (!game || confettiCount++ > 40) { clearInterval(confettiInterval); return; }
+                const c = game.add.graphics();
+                c.fillStyle(confettiColors[Math.floor(Math.random() * confettiColors.length)], 1);
+                const w = 4 + Math.random() * 5, h = 3 + Math.random() * 4;
+                c.fillRect(-w/2, -h/2, w, h);
+                const cx = sp.x + (Math.random() - 0.5) * 100;
+                const cy = (sp._baseY ?? sp.y) - 100 - Math.random() * 30;
+                c.setPosition(cx, cy).setDepth(3052).setRotation(Math.random() * Math.PI);
+                window._phaserTweens.add({
+                    targets: c,
+                    x: cx + (Math.random() - 0.5) * 50,
+                    y: cy + 120 + Math.random() * 40,
+                    rotation: c.rotation + (Math.random() - 0.5) * 8,
+                    alpha: 0,
+                    duration: 900 + Math.random() * 500,
+                    ease: 'Cubic.easeIn',
+                    delay: Math.random() * 200,
+                    onComplete: () => { try { c.destroy(); } catch(e) {} }
+                });
+            }, 100);
+
+            // 彩色音符从两侧飘出
+            const noteEmojis = ['♪', '♫', '🎵', '🎶', '🎤', '🎸'];
+            const noteColors = ['#ff4466','#ffaa00','#44ff88','#44aaff','#bb44ff'];
+            let noteCount = 0;
+            const noteInterval = setInterval(() => {
+                if (!game || noteCount++ > 10) { clearInterval(noteInterval); return; }
+                const side = noteCount % 2 === 0 ? -1 : 1;
+                const note = game.add.text(
+                    sp.x + side * 22,
+                    (sp._baseY ?? sp.y) - 50 - Math.random() * 20,
+                    noteEmojis[Math.floor(Math.random() * noteEmojis.length)],
+                    {
+                        fontSize: (14 + Math.random() * 10) + 'px',
+                        fill: noteColors[Math.floor(Math.random() * noteColors.length)],
+                        stroke: '#000', strokeThickness: 2
+                    }
+                ).setOrigin(0.5).setDepth(3053).setAlpha(0);
+                window._phaserTweens.add({
+                    targets: note, alpha: 1,
+                    x: note.x + side * (20 + Math.random() * 25),
+                    y: note.y - 45 - Math.random() * 25,
+                    duration: 900 + Math.random() * 400,
+                    ease: 'Sine.easeOut',
+                    onComplete: () => {
+                        window._phaserTweens.add({
+                            targets: note, alpha: 0, duration: 300,
+                            onComplete: () => { try { note.destroy(); } catch(e) {} }
+                        });
+                    }
+                });
+            }, 450);
+
+            // 循环庆祝台词
+            const danceLines = ['🎉 赢了！', '哈哈哈哈！', '太爽了！', '来来来！💃', '爱跳舞！✨'];
+            let danceIdx = 0;
+            _showAnimBubble(agentId, danceLines[0], 1100);
+            const danceLineInterval = setInterval(() => {
+                danceIdx = (danceIdx + 1) % danceLines.length;
+                _showAnimBubble(agentId, danceLines[danceIdx], 1100);
+            }, 1200);
+
+            setTimeout(() => {
+                try {
+                    clearInterval(rainbowInterval);
+                    clearInterval(confettiInterval);
+                    clearInterval(noteInterval);
+                    clearInterval(danceLineInterval);
+                    jumpTween.stop();
+                    swayTween.stop();
+                    sp.anims.stop();
+                    sp.anims.timeScale = 1;
+                    sp.setX(baseX);
+                    sp.setY(baseY);
+                    sp.setRotation(0);
+                    sp.setScale(origScaleX, origScaleY);
+                    sp.setFlipX(false);
+                    sp.clearTint();
+                    sp.setFrame(0);
+                    info.sprite._currentAnim = null;
+                } catch(e) {}
+            }, 5000);
         }
 
         async function submitChallenge(defenderId) {
@@ -1509,7 +2202,7 @@
         function _buildAvatarPicker() {
             const avatars = [
                 { key: 'rabbit', label: '兔子', img: '/static/rabbit.png' },
-                { key: 'caw',    label: '乌鸦', img: '/static/caw.png'    },
+                { key: 'cow',    label: '奶牛', img: '/static/cow.png'    },
                 { key: 'sheep',  label: '绵羊', img: '/static/sheep.png'  },
             ];
             // Sheet: 2752×1536, 6 cols × 4 rows → first frame = 458×384
@@ -1615,7 +2308,7 @@
         }
 
         function getAreaRect(area) {
-            // 区域坐标（海辛提供，左上-右下；这里的 x/y 作为 sprite 底部锚点坐标来用）
+            // 区域坐标（左上-右下；x/y 作为 sprite 底部锚点坐标来用）
             // 休息区域范围（511,262）（841,621）
             // 工作区域范围（190,526）（380,683）
             // error 区域范围（932,275）（1109,327）
@@ -1693,8 +2386,8 @@
                     } else if ((agent.name === '水星') && game.textures.exists('guestagent2')) {
                         sprite = game.add.image(p.x, p.y, 'guestagent2').setOrigin(0.5, 1).setScale(1.05);
                     } else {
-                        // Arena player avatars: caw / rabbit / sheep
-                        const ARENA_AVATAR_KEYS = { caw: 'avatar_caw', rabbit: 'avatar_rabbit', sheep: 'avatar_sheep' };
+                        // Arena player avatars: cow / rabbit / sheep
+                        const ARENA_AVATAR_KEYS = { cow: 'avatar_cow', rabbit: 'avatar_rabbit', sheep: 'avatar_sheep' };
                         const arenaKey = ARENA_AVATAR_KEYS[agent.avatar];
                         if (arenaKey && game.textures.exists(arenaKey)) {
                             sprite = game.add.sprite(p.x, p.y, arenaKey).setOrigin(0.5, 1);
@@ -1871,7 +2564,7 @@
             if (!DEMO_MODE) return;
             ensureDemoVisitors();
 
-            // 按海辛需求：每 8 秒切换一次状态
+            // 每 8 秒切换一次状态
             window.__demoNextAt = window.__demoNextAt || 0;
             const now = Date.now();
             if (now < window.__demoNextAt) return;
@@ -2102,19 +2795,10 @@
             this.load.spritesheet('flowers', '/static/flowers-spritesheet' + (supportsWebP ? '.webp' : '.png'), { frameWidth: 65, frameHeight: 65 });
 
             // Guest/Demo agent sprites (legacy, kept for demo mode)
-            this.load.image('guestagent1', '/static/guestagent1.webp?v={{VERSION_TIMESTAMP}}');
-            this.load.image('guestagent2', '/static/guestagent2.webp?v={{VERSION_TIMESTAMP}}');
-            this.load.spritesheet('guest_anim_1', '/static/guest_anim_1.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.spritesheet('guest_anim_2', '/static/guest_anim_2.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.spritesheet('guest_anim_3', '/static/guest_anim_3.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.spritesheet('guest_anim_4', '/static/guest_anim_4.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.spritesheet('guest_anim_5', '/static/guest_anim_5.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.spritesheet('guest_anim_6', '/static/guest_anim_6.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
-            this.load.image('demo_nika', '/static/demo_nika.webp?v={{VERSION_TIMESTAMP}}');
-            this.load.image('demo_mercury', '/static/demo_mercury.webp?v={{VERSION_TIMESTAMP}}');
+            // demo NPC assets removed (尼卡/水星 deprecated)
             // Arena player avatars
             // Arena avatar spritesheets (2752×1536, 6 cols × 4 rows → 458×384 per frame)
-            this.load.spritesheet('avatar_caw',    '/static/caw.webp',    { frameWidth: 458, frameHeight: 384 });
+            this.load.spritesheet('avatar_cow',    '/static/cow.webp',    { frameWidth: 458, frameHeight: 384 });
             this.load.spritesheet('avatar_rabbit', '/static/rabbit.webp', { frameWidth: 458, frameHeight: 384 });
             this.load.spritesheet('avatar_sheep',  '/static/sheep.webp',  { frameWidth: 458, frameHeight: 384 });
         }
@@ -2153,7 +2837,7 @@
 
             // Arena avatar animations (spritesheet: 6 cols × 4 rows = 24 frames)
             // Row 0 (frames 0-5): idle loop  |  Row 1 (frames 6-11): walk loop
-            ['caw', 'rabbit', 'sheep'].forEach(key => {
+            ['cow', 'rabbit', 'sheep'].forEach(key => {
                 const texKey = `avatar_${key}`;
                 if (!this.textures.exists(texKey)) return;
                 try {
@@ -2709,18 +3393,18 @@
                 return;
             }
 
-            // 萝卜固定巡逻：在 x=488~894, y=550 之间来回
+            // 萝卜固定巡逻：在 x=265~400, y=270 之间来回（左侧小区域）
             if (!window._luoboPatrol) {
                 window._luoboPatrol = { dir: 1 };
-                targetX = 894; targetY = 550;
+                targetX = 400; targetY = 270;
             }
             if (Math.abs(star.x - targetX) < 5) {
                 window._luoboPatrol.dir *= -1;
-                targetX = window._luoboPatrol.dir > 0 ? 894 : 488;
-                targetY = 550;
+                targetX = window._luoboPatrol.dir > 0 ? 400 : 265;
+                targetY = 270;
             }
             // Keep y locked
-            targetY = 550;
+            targetY = 270;
 
             const dx = targetX - star.x;
             const dy = targetY - star.y;
